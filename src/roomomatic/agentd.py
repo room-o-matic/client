@@ -41,6 +41,16 @@ class AgentdClient(Service):
             body["workspace"] = {"mode": "mount", "path": workspace_path}
         return self.request("POST", "/v1/sessions", json=body)
 
+    def by_operation(self, operation_id: str) -> dict | None:
+        """The session a spawn with this operation_id created here, or None if this gateway
+        has no record of it (docs#13 reconciliation)."""
+        try:
+            return self.request("GET", f"/v1/sessions/by-operation/{operation_id}")
+        except ApiError as e:
+            if e.status_code == 404:
+                return None
+            raise
+
     def session(self, session_id: str) -> dict:
         return self.request("GET", f"/v1/sessions/{session_id}")
 
