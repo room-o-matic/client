@@ -96,3 +96,7 @@ uv run python scripts/e2e.py         # real lobbyd + roomsd + agentd from ../lob
 ```
 
 Architecture, protocols and the operations guide live in [room-o-matic/docs](https://github.com/room-o-matic/docs). Issues are tracked there too. Report vulnerabilities privately; see [SECURITY.md](https://github.com/room-o-matic/.github/blob/main/SECURITY.md).
+
+## License
+
+[Apache-2.0](LICENSE)
