@@ -8,6 +8,7 @@ from roomomatic.client import (
     IncompatibleGateway,
     NoServerAvailable,
     Summoned,
+    WorkerFailedToStart,
 )
 from roomomatic.http import ApiError, RoomomaticError, RoomRef, SessionRef
 from roomomatic.lobby import Lobby
@@ -29,6 +30,7 @@ __all__ = [
     "SessionRef",
     "Summoned",
     "IncompatibleGateway",
+    "WorkerFailedToStart",
     "Assignment",
     "PeerAgent",
     "Delivery",

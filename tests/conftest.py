@@ -47,7 +47,9 @@ class FakeWorld:
             "http://agentd-2.test": "agentd-host2",
         }
         self.allowed_pairs: dict[str, list] = {}  # per-agentd override of allowed_for_you
-        self.down_hosts: set[str] = set()  # docs#14: any request to these fails (transport)
+        self.down_hosts: set[str] = set()
+        self.spawn_fails_launch = False  # docs#17: 201 with status "failed"
+        self.sessions_by_id: dict[str, dict] = {}  # docs#14: any request to these fails (transport)
         self.directory_down = False
         # Audiences lobbyd will mint tokens for (operator-approved endpoints, docs#5).
         self.approved = {"http://rooms-a.test", "http://rooms-b.test", "http://agentd-1.test"}
@@ -126,6 +128,7 @@ class FakeWorld:
                 "invite_id": f"inv_{len(self.invites) + 1}",
                 "agent": f"missy@test/{body['name']}",
                 "token": "rmsd_secret",
+                "expires_at": "2099-01-01T00:00:00.000Z",
                 "role": body["role"],
             }
             self.invites[inv["invite_id"]] = inv
@@ -167,9 +170,16 @@ class FakeWorld:
             }
             if op:
                 self.sessions_by_op[op] = session
+            session["room"] = {k: v for k, v in (body.get("room") or {}).items() if k != "token"}
+            if self.spawn_fails_launch:
+                session["status"] = "failed"
+            self.sessions_by_id[session["session_id"]] = session
             if self.drop_spawn_response:
                 raise httpx.ReadTimeout("response lost after commit", request=req)
             return httpx.Response(201, json=session)
+        if req.method == "GET" and p.startswith("/v1/sessions/agt_") and p.count("/") == 3:
+            sess = self.sessions_by_id.get(p.rsplit("/", 1)[1])
+            return httpx.Response(200, json=sess) if sess else httpx.Response(404)
         if p.startswith("/v1/sessions/by-operation/"):
             op = p.rsplit("/", 1)[1]
             if op in self.sessions_by_op:
@@ -177,12 +187,14 @@ class FakeWorld:
             return httpx.Response(404, json={"detail": "no session for that operation_id"})
         if p == "/v1/instance":
             pairs = [{"profile": "workspace_coder", "worker_type": "fake"}]
+            runtimes = {"workspace_coder": 7200}
             name = self.instance_names.get(origin, "agentd-pinned")
             caps = {
                 "protocol": "room-o-matic.agentd/1",
                 "kind": "gateway",
                 "pairs": pairs,
                 "allowed_for_you": self.allowed_pairs.get(origin, pairs),
+                "profile_runtime_seconds": runtimes,
             }
             return httpx.Response(
                 200, json={"instance_id": name, "base_url": origin, "capabilities": caps}
