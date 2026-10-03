@@ -7,8 +7,10 @@ from dataclasses import dataclass
 
 import httpx
 
-ROOM_URL_RE = re.compile(r"^(https?://\S+?)/v1/rooms/([A-Za-z0-9_]{1,64})$")
-SESSION_URL_RE = re.compile(r"^(https?://\S+?)/v1/sessions/([A-Za-z0-9_]{1,64})$")
+from roomomatic.urls import canonical_url
+
+ROOM_URL_RE = re.compile(r"^((?i:https?)://\S+?)/v1/rooms/([A-Za-z0-9_]{1,64})$")
+SESSION_URL_RE = re.compile(r"^((?i:https?)://\S+?)/v1/sessions/([A-Za-z0-9_]{1,64})$")
 
 # token(force_refresh) -> bearer token
 TokenSource = Callable[[bool], str]
@@ -16,6 +18,15 @@ TokenSource = Callable[[bool], str]
 
 class RoomomaticError(Exception):
     pass
+
+
+def service_url(url: str) -> str:
+    """Canonical form of a service URL; unsafe or malformed URLs are refused before any
+    credential, task or invite is sent to them (docs#5)."""
+    try:
+        return canonical_url(url)
+    except ValueError as e:
+        raise RoomomaticError(f"refusing service URL {url!r}: {e}") from None
 
 
 class ApiError(RoomomaticError):
@@ -48,7 +59,7 @@ class RoomRef:
         m = ROOM_URL_RE.match(room_url.rstrip("/"))
         if not m:
             raise RoomomaticError(f"not a room URL: {room_url!r} (want <roomsd>/v1/rooms/<id>)")
-        return cls(m.group(1), m.group(2))
+        return cls(service_url(m.group(1)), m.group(2))
 
 
 @dataclass(frozen=True)
@@ -67,7 +78,7 @@ class SessionRef:
             raise RoomomaticError(
                 f"not a session URL: {session_url!r} (want <agentd>/v1/sessions/<id>)"
             )
-        return cls(m.group(1), m.group(2))
+        return cls(service_url(m.group(1)), m.group(2))
 
 
 def static_token(token: str) -> TokenSource:
@@ -84,7 +95,7 @@ class Service:
         transport: httpx.BaseTransport | None = None,
         timeout: float = 10,
     ):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = service_url(base_url)
         self._token = token
         self._http = httpx.Client(base_url=self.base_url, transport=transport, timeout=timeout)
 
