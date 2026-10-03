@@ -107,7 +107,7 @@ def test_summon_pinned_instance_skips_registry(rom, world):
         worker_type="fake",
         instance_url="http://agentd-1.test/",
     )
-    assert s.worker_identity.startswith("missy@test/agentd-pinned.fake-")
+    assert s.worker_identity.startswith("missy@test/agentd-host1.fake-")
     assert world.calls("GET", "/v1/registry/agentd") == []
 
 
@@ -220,3 +220,45 @@ def test_peer_and_offer_requests(world):
         "/v1/offers/o1/progress",
         {"instance_id": "odin-s1", "state": "working"},
     )
+
+
+def test_incompatible_gateway_rejected_before_invite(rom, world):
+    from roomomatic import IncompatibleGateway
+
+    world.allowed_pairs["http://agentd-1.test"] = []  # not allowed for us
+    with pytest.raises(IncompatibleGateway, match="may not run"):
+        rom.summon("http://rooms-a.test/v1/rooms/room_1", "t", worker_type="fake")
+    assert world.calls("POST", "/invites") == []
+
+
+def test_incompatible_candidate_is_skipped(rom, world):
+    world.instances.append(
+        {
+            "instance_id": "agentd-host2",
+            "base_url": "http://agentd-2.test",
+            "worker_types": ["fake"],
+            "max_sessions": 4,
+            "active_sessions": 0,
+        }
+    )
+    world.approved.add("http://agentd-2.test")
+    world.allowed_pairs["http://agentd-1.test"] = []
+    s = rom.summon("http://rooms-a.test/v1/rooms/room_1", "t", worker_type="fake")
+    assert s.instance_id == "agentd-host2"
+    assert len(world.calls("POST", "/invites")) == 1
+
+
+def test_incompatibility_rules():
+    from roomomatic.client import incompatibility
+
+    ok = {
+        "capabilities": {
+            "protocol": "room-o-matic.agentd/1",
+            "kind": "gateway",
+            "allowed_for_you": [{"profile": "p", "worker_type": "w"}],
+        }
+    }
+    assert incompatibility(ok, profile="p", worker_type="w") is None
+    assert "pre-docs#15" in incompatibility({}, profile="p", worker_type="w")
+    v2 = {"capabilities": {**ok["capabilities"], "protocol": "room-o-matic.agentd/2"}}
+    assert "protocol" in incompatibility(v2, profile="p", worker_type="w")
