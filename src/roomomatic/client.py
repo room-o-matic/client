@@ -8,6 +8,7 @@ for room_url, msg in rom.watch():            # every joined room on every roomsd
 """
 
 import os
+import secrets
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -142,7 +143,9 @@ class Client:
             instance["base_url"] = instance_url.rstrip("/")
         else:
             instance = self.pick_agentd(worker_type, profile)
-        worker_name = name or f"{instance['instance_id']}.{worker_type}"
+        # roomsd allows one live invite per guest identity, so the default name is unique
+        # per summon. Pass `name` for a stable identity (e.g. to rotate a credential).
+        worker_name = name or f"{instance['instance_id']}.{worker_type}-{secrets.token_hex(3)}"
         invite = rooms.invite(room_id, worker_name, role=role, ttl_seconds=invite_ttl_seconds)
         agentd = self.agentd(instance["base_url"])
         try:
