@@ -28,6 +28,27 @@ class NoServerAvailable(RoomomaticError):
     pass
 
 
+SUPPORTED_GATEWAY_PROTOCOL = "room-o-matic.agentd/1"
+
+
+class IncompatibleGateway(RoomomaticError):
+    """The gateway doesn't speak a protocol version we support, or won't run this
+    profile/worker_type for us."""
+
+
+def incompatibility(info: dict, *, profile: str, worker_type: str) -> str | None:
+    caps = info.get("capabilities")
+    if not caps:
+        return "no capability contract advertised (pre-docs#15 gateway)"
+    if caps.get("protocol") != SUPPORTED_GATEWAY_PROTOCOL:
+        return f"protocol {caps.get('protocol')!r} isn't {SUPPORTED_GATEWAY_PROTOCOL!r}"
+    if caps.get("kind") != "gateway":
+        return f"endpoint kind is {caps.get('kind')!r}, not a spawning gateway"
+    if {"profile": profile, "worker_type": worker_type} not in caps.get("allowed_for_you", []):
+        return f"you may not run worker_type {worker_type!r} with profile {profile!r} here"
+    return None
+
+
 class AmbiguousSummon(RoomomaticError):
     """A spawn may or may not have started and agentd couldn't be asked. The invite was
     left in place; retry summon with the same operation_id and instance_url."""
@@ -206,7 +227,12 @@ class Client:
             base = inst["base_url"]
             # Token before invite: lobbyd only mints tokens for approved endpoints (docs#5).
             self.lobby.token(base)
-            instance_id = inst.get("instance_id") or self.agentd(base).instance()["instance_id"]
+            info = self.agentd(base).instance()
+            problem = incompatibility(info, profile=profile, worker_type=worker_type)
+            if problem:  # rejected before any invite exists (docs#15)
+                last_error = IncompatibleGateway(f"{base}: {problem}")
+                continue
+            instance_id = info["instance_id"]
             worker_name = name or f"{instance_id}.{worker_type}-{op[-6:]}"
             invite = self._mint_invite(rooms, room_id, worker_name, role, invite_ttl_seconds)
             agentd = self.agentd(base)
@@ -240,7 +266,7 @@ class Client:
                 worker_identity=invite["agent"],
                 operation_id=op,
             )
-        raise last_error  # every candidate was at capacity
+        raise last_error  # every candidate was at capacity or incompatible
 
     # ----- summon internals (docs#13) ----------------------------------------------------
 

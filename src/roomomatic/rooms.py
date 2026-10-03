@@ -33,13 +33,29 @@ class RoomsClient(Service):
         purpose: str | None = None,
         listed: bool = False,
         tags: list[str] | None = None,
+        admission: str | None = None,
+        default_rights: list[str] | None = None,
     ) -> dict:
-        """Returns {room_id, room_url}. The creator joins automatically."""
-        return self.request(
-            "POST",
-            "/v1/rooms",
-            json={"name": name, "purpose": purpose, "listed": listed, "tags": tags or []},
-        )
+        """Returns {room_id, room_url}. The creator joins automatically and is admin.
+        admission: "open" | "closed" (default: the server's setting)."""
+        body = {"name": name, "purpose": purpose, "listed": listed, "tags": tags or []}
+        if admission is not None:
+            body["admission"] = admission
+        if default_rights is not None:
+            body["default_rights"] = default_rights
+        return self.request("POST", "/v1/rooms", json=body)
+
+    # ----- membership (admins) ---------------------------------------------------------
+
+    def members(self, room_id: str) -> list[dict]:
+        return self.request("GET", f"/v1/rooms/{room_id}/members")
+
+    def grant(self, room_id: str, agent: str, rights: list[str]) -> dict:
+        """Grant a named agent rights (read/write/invite/admin); also lifts a ban."""
+        return self.request("PUT", f"/v1/rooms/{room_id}/members/{agent}", json={"rights": rights})
+
+    def remove(self, room_id: str, agent: str, *, ban: bool = False) -> None:
+        self.request("DELETE", f"/v1/rooms/{room_id}/members/{agent}", params={"ban": ban})
 
     def rooms(self) -> list[dict]:
         return self.request("GET", "/v1/rooms")

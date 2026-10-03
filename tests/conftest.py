@@ -42,6 +42,11 @@ class FakeWorld:
         self.agentd_unreachable = False  # every agentd request fails at transport level
         self.roomsd_delete_down = False  # invite revocation fails at transport level
         self.status_by_host: dict[str, int] = {}  # per-agentd forced spawn status
+        self.instance_names = {
+            "http://agentd-1.test": "agentd-host1",
+            "http://agentd-2.test": "agentd-host2",
+        }
+        self.allowed_pairs: dict[str, list] = {}  # per-agentd override of allowed_for_you
         self.down_hosts: set[str] = set()  # docs#14: any request to these fails (transport)
         self.directory_down = False
         # Audiences lobbyd will mint tokens for (operator-approved endpoints, docs#5).
@@ -171,7 +176,17 @@ class FakeWorld:
                 return httpx.Response(200, json=self.sessions_by_op[op])
             return httpx.Response(404, json={"detail": "no session for that operation_id"})
         if p == "/v1/instance":
-            return httpx.Response(200, json={"instance_id": "agentd-pinned", "base_url": "x"})
+            pairs = [{"profile": "workspace_coder", "worker_type": "fake"}]
+            name = self.instance_names.get(origin, "agentd-pinned")
+            caps = {
+                "protocol": "room-o-matic.agentd/1",
+                "kind": "gateway",
+                "pairs": pairs,
+                "allowed_for_you": self.allowed_pairs.get(origin, pairs),
+            }
+            return httpx.Response(
+                200, json={"instance_id": name, "base_url": origin, "capabilities": caps}
+            )
         if p.endswith("/events"):
             frames = (
                 "id: 1\nevent: status\ndata: "

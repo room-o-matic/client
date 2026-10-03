@@ -30,11 +30,12 @@ def service_url(url: str) -> str:
 
 
 class ApiError(RoomomaticError):
-    def __init__(self, status_code: int, detail, url: str):
+    def __init__(self, status_code: int, detail, url: str, retry_after: float | None = None):
         super().__init__(f"{status_code} from {url}: {detail}")
         self.status_code = status_code
         self.detail = detail
         self.url = url
+        self.retry_after = retry_after  # seconds, from a 429/503 Retry-After header
 
     @classmethod
     def from_response(cls, r: httpx.Response) -> "ApiError":
@@ -42,7 +43,11 @@ class ApiError(RoomomaticError):
             detail = r.json().get("detail", r.text)
         except ValueError:
             detail = r.text
-        return cls(r.status_code, detail, str(r.request.url))
+        try:
+            retry_after = float(r.headers["retry-after"]) if "retry-after" in r.headers else None
+        except ValueError:
+            retry_after = None
+        return cls(r.status_code, detail, str(r.request.url), retry_after)
 
 
 @dataclass(frozen=True)
