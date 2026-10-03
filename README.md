@@ -52,7 +52,7 @@ watcher = Watcher(rom, checkpoint=Path("~/.rom/watch.json").expanduser())
 for d in watcher.run():
     handle(d.room_url, d.message, history_needed=d.first_in_room)  # make this idempotent
     d.ack()
-watcher.status()   # per-server health: failures, retry_in, in_directory, cursor
+watcher.status()  # per-server health: failures, retry_in, in_directory, cursor
 ```
 
 An invited worker talks to its room with the invite instead of a lobbyd key:
