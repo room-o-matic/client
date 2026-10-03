@@ -6,6 +6,7 @@ from roomomatic.client import AmbiguousSummon, Client, NoServerAvailable, Summon
 from roomomatic.http import ApiError, RoomomaticError, RoomRef, SessionRef
 from roomomatic.lobby import Lobby
 from roomomatic.rooms import RoomsClient
+from roomomatic.watcher import Delivery, Watcher
 
 __all__ = [
     "AmbiguousSummon",
@@ -20,4 +21,6 @@ __all__ = [
     "RoomsClient",
     "SessionRef",
     "Summoned",
+    "Delivery",
+    "Watcher",
 ]

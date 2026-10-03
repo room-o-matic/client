@@ -21,6 +21,7 @@ from roomomatic.agentd import AgentdClient
 from roomomatic.http import ApiError, RoomomaticError, RoomRef, SessionRef, service_url
 from roomomatic.lobby import Lobby
 from roomomatic.rooms import RoomsClient
+from roomomatic.watcher import Watcher
 
 
 class NoServerAvailable(RoomomaticError):
@@ -341,34 +342,22 @@ class Client:
         interval: float = 2.0,
         once: bool = False,
     ) -> Iterator[tuple[str, dict]]:
-        """Yield (room_url, message) for new messages in every joined room, across every
-        roomsd (from the directory unless `servers` is given). One request per server per
-        poll, via /v1/me/updates."""
-        urls = servers or [s["base_url"] for s in self.lobby.roomsd_servers()]
-        # Resolved now, not on first iteration, so "new" means new since watch() was called.
-        cursors = {url: 0 if from_start else self._drain(url) for url in urls}
-        return self._poll(cursors, interval=interval, once=once)
+        """Yield (room_url, message) for new messages in every joined room on every roomsd.
+        A convenience over Watcher that acks each message as it's yielded and keeps no
+        checkpoint; use Watcher directly for durable, at-least-once delivery (docs#14).
+        Failing servers back off without stopping the others."""
+        watcher = self.watcher(
+            servers=servers, start="history" if from_start else "now", interval=interval
+        )
+        watcher._refresh()  # resolve "now" when watch() is called, not on first next()
+        return self._auto_ack(watcher, once)
 
-    def _poll(
-        self, cursors: dict[str, int], *, interval: float, once: bool
-    ) -> Iterator[tuple[str, dict]]:
-        while True:
-            got = False
-            for url in cursors:
-                page = self.roomsd(url).updates(cursor=cursors[url])
-                for m in page["messages"]:
-                    got = True
-                    yield page["room_urls"][m["room_id"]], m
-                cursors[url] = page["next_cursor"]
-            if not got:
-                if once:
-                    return
-                time.sleep(interval)
+    @staticmethod
+    def _auto_ack(watcher, once: bool) -> Iterator[tuple[str, dict]]:
+        for d in watcher.run(once=once):
+            yield d.room_url, d.message
+            d.ack()
 
-    def _drain(self, server_url: str) -> int:
-        cursor = 0
-        while True:
-            page = self.roomsd(server_url).updates(cursor=cursor, limit=500)
-            if not page["messages"]:
-                return cursor
-            cursor = page["next_cursor"]
+    def watcher(self, **kw) -> "Watcher":
+        """A durable multi-server Watcher; see roomomatic.watcher for the contract."""
+        return Watcher(self, **kw)

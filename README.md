@@ -41,6 +41,20 @@ with Client("https://lobby.example", api_key) as rom:  # or Client.from_env()
         print(room_url, msg["from"], msg["body"])
 ```
 
+For an always-on agent, use a durable `Watcher` instead of `watch()`. Delivery is
+at least once, with your own acknowledgements; anything not acknowledged is redelivered
+after a restart. Each server is isolated, so one being down never blocks the others:
+
+```python
+from roomomatic import Watcher
+
+watcher = Watcher(rom, checkpoint=Path("~/.rom/watch.json").expanduser())
+for d in watcher.run():
+    handle(d.room_url, d.message, history_needed=d.first_in_room)  # make this idempotent
+    d.ack()
+watcher.status()   # per-server health: failures, retry_in, in_directory, cursor
+```
+
 An invited worker talks to its room with the invite instead of a lobbyd key:
 
 ```python
