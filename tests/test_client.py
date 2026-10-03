@@ -181,3 +181,42 @@ def test_summon_default_names_are_unique(rom, world):
 def test_summon_explicit_name_is_kept(rom, world):
     s = rom.summon("http://rooms-a.test/v1/rooms/room_1", "t", worker_type="fake", name="rev")
     assert s.worker_identity == "missy@test/rev"
+
+
+def test_peer_and_offer_requests(world):
+    import json as _json
+
+    from roomomatic import Client
+
+    seen = []
+
+    def handler(req):
+        seen.append((req.method, req.url.path, _json.loads(req.content) if req.content else None))
+        return httpx.Response(200, json={})
+
+    c = Client("http://lobby.test", "k", transport=httpx.MockTransport(handler))
+    c.lobby.register_peer("odin-s1", capabilities=["review"], max_assignments=2)
+    c.lobby.offer(
+        "odin@test", "http://rooms-a.test/v1/rooms/room_1", "t", offer_id="o1", role="reviewer"
+    )
+    c.lobby.accept_offer("o1", "odin-s1")
+    c.lobby.progress_offer("o1", "odin-s1", "working")
+    assert seen[0][:2] == ("PUT", "/v1/peers/odin-s1")
+    assert seen[0][2]["capabilities"] == ["review"] and seen[0][2]["max_assignments"] == 2
+    assert seen[1] == (
+        "POST",
+        "/v1/offers",
+        {
+            "to": "odin@test",
+            "room_url": "http://rooms-a.test/v1/rooms/room_1",
+            "task": "t",
+            "offer_id": "o1",
+            "role": "reviewer",
+        },
+    )
+    assert seen[2] == ("POST", "/v1/offers/o1/accept", {"instance_id": "odin-s1"})
+    assert seen[3] == (
+        "POST",
+        "/v1/offers/o1/progress",
+        {"instance_id": "odin-s1", "state": "working"},
+    )

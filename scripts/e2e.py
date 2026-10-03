@@ -68,6 +68,7 @@ def services():
     keys = {
         "missy": key("missy", "agent"),
         "boostie": key("boostie", "agent"),
+        "odin": key("odin", "agent"),
         "rooms": key("rooms-a", "roomsd", urls["rooms"]),
         "agentd": key("agentd-e2e", "agentd", urls["agentd"]),
     }
@@ -199,6 +200,60 @@ def main() -> None:
             missy.agentd(urls["agentd"]).session("agt_nope")
         except ApiError as e:
             check(e.status_code == 404, "unknown session is 404")
+
+        # Named peers (docs#7): existing agents take offered room work; nothing is spawned.
+        odin = Client(urls["lobby"], keys["odin"])
+        sessions_before = len(missy.agentd(urls["agentd"]).sessions())
+        odin.lobby.register_peer("odin-e2e", capabilities=["review"])
+        boostie.lobby.register_peer("boostie-e2e", capabilities=["review"])
+        listed_peers = {p["principal"] for p in missy.lobby.peers(capability="review")}
+        check(listed_peers == {f"odin@{DOMAIN}", f"boostie@{DOMAIN}"}, "both peers registered")
+
+        o1 = missy.lobby.offer(
+            f"odin@{DOMAIN}",
+            room["room_url"],
+            "review the schema",
+            offer_id="e2e-odin",
+            role="reviewer",
+        )
+        check(
+            [o["offer_id"] for o in odin.lobby.inbox("odin-e2e")] == ["e2e-odin"], "odin gets offer"
+        )
+        odin.lobby.decline_offer(o1["offer_id"], "odin-e2e", reason="busy")
+        check(missy.lobby.get_offer("e2e-odin")["state"] == "declined", "odin declines")
+
+        missy.lobby.offer(
+            f"boostie@{DOMAIN}",
+            room["room_url"],
+            "review the schema",
+            offer_id="e2e-boostie",
+            role="reviewer",
+        )
+        (o2,) = boostie.lobby.inbox("boostie-e2e")
+        check(
+            boostie.lobby.accept_offer(o2["offer_id"], "boostie-e2e")["changed"], "boostie accepts"
+        )
+        rooms_bp, room_id_p = boostie.room(o2["room_url"])  # joins with its own identity
+        rooms_bp.join(room_id_p, role=o2["role"])
+        boostie.lobby.progress_offer(o2["offer_id"], "boostie-e2e", "joined")
+        started = boostie.lobby.progress_offer(o2["offer_id"], "boostie-e2e", "working")
+        check(started["changed"], "boostie starts work once")
+        rooms_bp.post(room_id_p, "Schema looks fine.", type="finding")
+
+        reconnected = Client(urls["lobby"], keys["boostie"])  # a fresh process, same session
+        reconnected.lobby.register_peer("boostie-e2e", capabilities=["review"])
+        (pending,) = reconnected.lobby.inbox("boostie-e2e")
+        check(pending["state"] == "working", "assignment survives reconnect")
+        again = reconnected.lobby.progress_offer(pending["offer_id"], "boostie-e2e", "working")
+        check(again["changed"] is False, "reconnect does not execute the assignment twice")
+        reconnected.lobby.progress_offer(pending["offer_id"], "boostie-e2e", "completed")
+        check(missy.lobby.get_offer("e2e-boostie")["state"] == "completed", "offer completed")
+        check(
+            len(missy.agentd(urls["agentd"]).sessions()) == sessions_before,
+            "no worker process was spawned for the peers",
+        )
+        odin.close()
+        reconnected.close()
 
         # The CLI, against the same services.
         cli_env = {**os.environ, "ROM_LOBBY_URL": urls["lobby"], "ROM_API_KEY": keys["boostie"]}
