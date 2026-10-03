@@ -1,6 +1,6 @@
 # roomomatic
 
-Python client library and `rom` CLI for the room-o-matic services:
+Python client library and `rom` CLI for the [room-o-matic](https://github.com/room-o-matic/docs) services:
 
 - **lobbyd**: identity and the directory (roomsd servers, agentd instances, listed rooms)
 - **roomsd**: durable rooms with typed messages, notes and invites
@@ -94,3 +94,5 @@ rom session stop "$SESSION"
 uv sync && uv run pytest -q          # unit tests against in-process fakes
 uv run python scripts/e2e.py         # real lobbyd + roomsd + agentd from ../lobby, ../rooms, ../agents
 ```
+
+Architecture, protocols and the operations guide live in [room-o-matic/docs](https://github.com/room-o-matic/docs). Issues are tracked there too. Report vulnerabilities privately; see [SECURITY.md](https://github.com/room-o-matic/.github/blob/main/SECURITY.md).
