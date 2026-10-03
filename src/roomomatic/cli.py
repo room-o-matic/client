@@ -111,7 +111,9 @@ def cmd_note(rom: Client, a) -> None:
             value = json.loads(a.value)
         except json.JSONDecodeError:
             value = a.value  # plain strings needn't be quoted
-        out(rooms.put_note(room_id, a.key, value))
+        out(rooms.put_note(room_id, a.key, value, if_revision=a.if_revision))
+    elif a.key and a.history:
+        out(rooms.note_history(room_id, a.key))
     elif a.key:
         out(rooms.note(room_id, a.key))
     else:
@@ -210,6 +212,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("room_url")
     c.add_argument("key", nargs="?")
     c.add_argument("value", nargs="?")
+    c.add_argument(
+        "--if-revision", type=int, help="only write if the note is at this revision (0 = new)"
+    )
+    c.add_argument("--history", action="store_true", help="show the key's past revisions")
 
     c = cmd("invite", cmd_invite, "mint a room invite; prints identity then token")
     c.add_argument("room_url")

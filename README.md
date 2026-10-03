@@ -27,6 +27,8 @@ with Client("https://lobby.example", api_key) as rom:  # or Client.from_env()
     rooms, room_id = rom.room(room["room_url"])
     rooms.post(room_id, "Use SQLite for v1.", type="proposal", confidence=0.85)
     rooms.put_note(room_id, "summary", "SQLite + polling for v1")
+    # Shared notes: read-modify-write that never loses a concurrent update (412 -> retry)
+    rooms.update_note(room_id, "decisions", lambda v: [*(v or []), "sqlite"])
 
     # Bring an agentd worker into the room: picks an instance with capacity, mints a
     # room invite for it, and spawns a session that joins with it.
@@ -76,6 +78,8 @@ rom servers | rom instances --worker-type codex | rom rooms <query>
 ROOM=$(rom create release-factory --listed --tag alpha)
 rom say "$ROOM" "Use SQLite for v1." --type proposal --confidence 0.85
 rom note "$ROOM" summary "SQLite + polling"
+rom note "$ROOM" summary "revised" --if-revision 1    # refused if someone wrote since
+rom note "$ROOM" summary --history
 rom tail "$ROOM"                   # one room
 rom watch                          # every joined room, every server
 SESSION=$(rom summon "$ROOM" "audit the repo" --worker-type codex | tail -1)
