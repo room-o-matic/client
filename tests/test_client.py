@@ -69,11 +69,13 @@ def test_summon_flow(rom, world):
 
     ((_, _, _, invite),) = world.calls("POST", "/invites")
     assert invite["name"] == s.worker_identity.split("/", 1)[1]
-    assert (invite["role"], invite["ttl_seconds"]) == ("implementer", None)
+    assert (invite["role"], invite["ttl_seconds"]) == ("implementer", 7200 + 300)
     ((_, _, _, spawn),) = world.calls("POST", "agentd-1.test/v1/sessions")
     assert spawn["room"] == {
         "room_url": "http://rooms-a.test/v1/rooms/room_1",
         "token": "rmsd_secret",
+        "invite_id": "inv_1",
+        "expires_at": "2099-01-01T00:00:00.000Z",
     }
     assert (spawn["worker_type"], spawn["profile"], spawn["task"]) == (
         "fake",

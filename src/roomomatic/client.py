@@ -49,6 +49,25 @@ def incompatibility(info: dict, *, profile: str, worker_type: str) -> str | None
     return None
 
 
+# roomsd's ceiling for invite lifetimes (max_invite_ttl_seconds).
+MAX_INVITE_TTL = 24 * 3600
+INVITE_TTL_SLACK = 300
+
+
+def invite_ttl_for(info: dict, profile: str) -> int | None:
+    """An invite lifetime that covers the profile's maximum runtime (docs#17), so a legal
+    session doesn't lose room access mid-run. agentd also caps the session at the invite's
+    expiry, so if this can't be computed the session just ends with its access."""
+    runtime = (info.get("capabilities") or {}).get("profile_runtime_seconds", {}).get(profile)
+    if not runtime:
+        return None
+    return min(int(runtime) + INVITE_TTL_SLACK, MAX_INVITE_TTL)
+
+
+class WorkerFailedToStart(RoomomaticError):
+    """agentd accepted the spawn but the worker failed to launch; the invite was revoked."""
+
+
 class AmbiguousSummon(RoomomaticError):
     """A spawn may or may not have started and agentd couldn't be asked. The invite was
     left in place; retry summon with the same operation_id and instance_url."""
@@ -234,14 +253,22 @@ class Client:
                 continue
             instance_id = info["instance_id"]
             worker_name = name or f"{instance_id}.{worker_type}-{op[-6:]}"
-            invite = self._mint_invite(rooms, room_id, worker_name, role, invite_ttl_seconds)
+            ttl = invite_ttl_seconds or invite_ttl_for(info, profile)
+            invite = self._mint_invite(rooms, room_id, worker_name, role, ttl)
             agentd = self.agentd(base)
             try:
                 spawned = agentd.spawn(
                     task,
                     worker_type=worker_type,
                     profile=profile,
-                    room={"room_url": room_ref, "token": invite["token"]},
+                    room={
+                        "room_url": room_ref,
+                        "token": invite["token"],
+                        # docs#17: lets agentd hand cleanup back to us by id, and bounds the
+                        # session to the invite's lifetime.
+                        "invite_id": invite["invite_id"],
+                        "expires_at": invite.get("expires_at"),
+                    },
                     operation_id=op,
                     **spawn_fields,
                 )
@@ -257,6 +284,13 @@ class Client:
                     return self._summoned(base, found, room_ref, rooms, room_id, invite)
                 self._cleanup(e, rooms, room_id, invite["invite_id"])
                 raise
+            if spawned.get("status") == "failed":
+                # A launch failure comes back as 201 + failed: don't leave the invite live.
+                err = WorkerFailedToStart(
+                    f"worker failed to start on {base} (session {spawned['session_id']})"
+                )
+                self._cleanup(err, rooms, room_id, invite["invite_id"])
+                raise err
             return Summoned(
                 session_url=agentd.session_url(spawned["session_id"]),
                 session_id=spawned["session_id"],
@@ -343,6 +377,23 @@ class Client:
     def _journal_save(self) -> None:
         if self.cleanup_journal is not None:
             self.cleanup_journal.write_text(json.dumps(self.pending_cleanups))
+
+    def finalize_session(self, session_url: str) -> str:
+        """Finish a room cleanup agentd handed back (docs#17): if the session's
+        room_finalization is owner_required, revoke its invite by id as the inviter.
+        Returns the resulting finalization state."""
+        agentd, sid = self.session(session_url)
+        s = agentd.session(sid)
+        state = s.get("room_finalization")
+        if state != "owner_required" or not s.get("room_invite_id") or not s.get("room_url"):
+            return state
+        rooms, room_id = self.room(s["room_url"])
+        try:
+            rooms.revoke_invite(room_id, s["room_invite_id"])
+        except ApiError as e:
+            if e.status_code != 404:
+                raise
+        return "revoked_by_owner"
 
     def retry_cleanups(self) -> int:
         """Retry journaled invite revocations; returns how many are still pending."""
