@@ -1,6 +1,10 @@
 import httpx
 
-from roomomatic.http import Service, TokenSource, static_token
+from roomomatic.http import ApiError, Service, TokenSource, static_token
+
+
+class NoteConflict(ApiError):
+    """A conditional note write lost: the note isn't at the revision you read (412)."""
 
 
 class RoomsClient(Service):
@@ -99,8 +103,50 @@ class RoomsClient(Service):
     def note(self, room_id: str, key: str) -> dict:
         return self.request("GET", f"/v1/rooms/{room_id}/notes/{key}")
 
-    def put_note(self, room_id: str, key: str, value) -> dict:
-        return self.request("PUT", f"/v1/rooms/{room_id}/notes/{key}", json={"value": value})
+    def put_note(self, room_id: str, key: str, value, if_revision: int | None = None) -> dict:
+        """Write a note; returns it with its new `revision`. With `if_revision`, the write
+        only happens if the note is still at that revision (0 = only if it doesn't exist
+        yet), else NoteConflict. Without it, last writer wins (docs#20)."""
+        body: dict = {"value": value}
+        if if_revision is not None:
+            body["if_revision"] = if_revision
+        try:
+            return self.request("PUT", f"/v1/rooms/{room_id}/notes/{key}", json=body)
+        except ApiError as e:
+            if e.status_code == 412:
+                raise NoteConflict(e.status_code, e.detail, e.url) from None
+            raise
+
+    def update_note(self, room_id: str, key: str, fn, attempts: int = 5) -> dict:
+        """Read-modify-write without losing concurrent updates: `fn(current_value)` (None
+        if the note doesn't exist) returns the new value, which is written with
+        compare-and-set; on a conflict the note is re-read and `fn` runs again."""
+        for attempt in range(attempts):
+            try:
+                current = self.note(room_id, key)
+            except ApiError as e:
+                if e.status_code != 404:
+                    raise
+                current = {"value": None, "revision": 0}
+            try:
+                return self.put_note(
+                    room_id, key, fn(current["value"]), if_revision=current["revision"]
+                )
+            except NoteConflict:
+                if attempt == attempts - 1:
+                    raise
+        raise AssertionError("unreachable")
+
+    def note_history(self, room_id: str, key: str) -> list[dict]:
+        """Recent revisions of a note, newest first (the server keeps the last 50)."""
+        return self.request("GET", f"/v1/rooms/{room_id}/notes/{key}/history")
+
+    def note_changes(self, room_id: str, after: int = 0, limit: int = 100) -> dict:
+        """Note writes after cursor `after`: {changes: [{id, key, revision, updated_by,
+        updated_at}], next_cursor}. Notes aren't in the message feed; poll this."""
+        return self.request(
+            "GET", f"/v1/rooms/{room_id}/notes/changes", params={"after": after, "limit": limit}
+        )
 
     # ----- invites -------------------------------------------------------------------
 

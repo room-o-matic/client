@@ -13,7 +13,7 @@ from roomomatic.client import (
 from roomomatic.http import ApiError, RoomomaticError, RoomRef, SessionRef
 from roomomatic.lobby import Lobby
 from roomomatic.peer import Assignment, PeerAgent
-from roomomatic.rooms import RoomsClient
+from roomomatic.rooms import NoteConflict, RoomsClient
 from roomomatic.watcher import Delivery, Watcher
 
 __all__ = [
@@ -24,6 +24,7 @@ __all__ = [
     "Client",
     "Lobby",
     "NoServerAvailable",
+    "NoteConflict",
     "RoomRef",
     "RoomomaticError",
     "RoomsClient",

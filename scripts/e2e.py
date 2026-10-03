@@ -20,7 +20,7 @@ from pathlib import Path
 
 import httpx
 
-from roomomatic import TERMINAL_STATUSES, ApiError, Client, RoomsClient
+from roomomatic import TERMINAL_STATUSES, ApiError, Client, NoteConflict, RoomsClient
 
 WORKSPACE = Path(__file__).resolve().parents[2]
 DOMAIN = "e2e"
@@ -171,6 +171,22 @@ def main() -> None:
         rooms_b, room_id = boostie.room(listed[0]["room_url"])
         rooms_b.join(room_id, role="reviewer")
         rooms_b.post(room_id, "Use SQLite for v1.", type="proposal", confidence=0.8)
+
+        # docs#20: two writers share a note without losing an update
+        rooms_m, _ = missy.room(room["room_url"])
+        base = rooms_b.put_note(room_id, "decisions", ["sqlite"], if_revision=0)["revision"]
+        rooms_m.put_note(room_id, "decisions", ["sqlite", "polling"], if_revision=base)
+        try:
+            rooms_b.put_note(room_id, "decisions", ["sqlite", "uv"], if_revision=base)
+            check(False, "stale note write refused")
+        except NoteConflict:
+            check(True, "stale note write refused")
+        merged = rooms_b.update_note(room_id, "decisions", lambda v: [*v, "uv"])
+        check(
+            merged["value"] == ["sqlite", "polling", "uv"], "update_note merges concurrent writes"
+        )
+        check(len(rooms_m.note_history(room_id, "decisions")) == 3, "note history kept")
+        check(rooms_m.note_changes(room_id)["changes"][-1]["revision"] == 3, "note changes feed")
 
         summoned = missy.summon(room["room_url"], "interactive", worker_type="fake")
         check(

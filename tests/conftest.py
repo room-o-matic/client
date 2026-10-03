@@ -51,6 +51,9 @@ class FakeWorld:
         self.spawn_fails_launch = False  # docs#17: 201 with status "failed"
         self.sessions_by_id: dict[str, dict] = {}  # docs#14: any request to these fails (transport)
         self.directory_down = False
+        # docs#20: roomsd notes with revisions: (origin, room, key) -> list of revisions
+        self.notes: dict[tuple, list[dict]] = defaultdict(list)
+        self.note_changes: list[dict] = []
         # Audiences lobbyd will mint tokens for (operator-approved endpoints, docs#5).
         self.approved = {"http://rooms-a.test", "http://rooms-b.test", "http://agentd-1.test"}
 
@@ -138,6 +141,8 @@ class FakeWorld:
             if inv_id in self.invites:
                 self.invites[inv_id]["revoked_at"] = "now"
             return httpx.Response(200, json={"revoked_at": "now"})
+        if "/notes" in p:
+            return self.roomsd_notes(origin, req, body)
         if p == "/v1/me/updates":
             cursor = int(req.url.params.get("cursor", 0))
             limit = int(req.url.params.get("limit", 100))
@@ -151,6 +156,37 @@ class FakeWorld:
                 },
             )
         return httpx.Response(404)
+
+    def roomsd_notes(self, origin, req, body):
+        parts = req.url.path.split("/")  # '', v1, rooms, <room>, notes, [key], [history]
+        room = parts[3]
+        if parts[5:] == ["changes"]:
+            after = int(req.url.params.get("after", 0))
+            changes = [c for c in self.note_changes if c["room"] == room and c["id"] > after]
+            out = [{k: v for k, v in c.items() if k != "room"} for c in changes]
+            return httpx.Response(
+                200, json={"changes": out, "next_cursor": out[-1]["id"] if out else after}
+            )
+        revs = self.notes[(origin, room, parts[5])]
+        if len(parts) == 7 and parts[6] == "history":
+            return httpx.Response(200, json=list(reversed(revs)))
+        if req.method == "GET":
+            return httpx.Response(200, json=revs[-1]) if revs else httpx.Response(404)
+        current = revs[-1]["revision"] if revs else 0
+        want = body.get("if_revision")
+        if want is not None and want != current:
+            return httpx.Response(412, json={"detail": f"note is at revision {current}"})
+        note = {"key": parts[5], "value": body["value"], "revision": current + 1}
+        revs.append(note)
+        self.note_changes.append(
+            {
+                "id": len(self.note_changes) + 1,
+                "room": room,
+                "key": parts[5],
+                "revision": current + 1,
+            }
+        )
+        return httpx.Response(200, json=note)
 
     def agentd(self, origin, req, body):
         p = req.url.path
