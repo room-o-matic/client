@@ -72,6 +72,13 @@ def services():
         "rooms": key("rooms-a", "roomsd", urls["rooms"]),
         "agentd": key("agentd-e2e", "agentd", urls["agentd"]),
     }
+    # agentd is default-deny (docs#9): the operator grants callers explicitly.
+    agentd_config = tmp / "agentd.yaml"
+    agentd_config.write_text(
+        "callers:\n"
+        f"  missy@{DOMAIN}:\n"
+        "    {trust: trusted, profiles: ['*'], worker_types: ['*'], max_sessions: 4}\n"
+    )
     procs = [
         subprocess.Popen(
             [bin_("lobby", "lobbyd"), "serve", "--port", str(ports["lobby"])],
@@ -94,7 +101,14 @@ def services():
             stderr=subprocess.STDOUT,
         ),
         subprocess.Popen(
-            [bin_("agents", "agentd"), "serve", "--port", str(ports["agentd"])],
+            [
+                bin_("agents", "agentd"),
+                "--config",
+                str(agentd_config),
+                "serve",
+                "--port",
+                str(ports["agentd"]),
+            ],
             env={
                 **base_env,
                 "AGENTD_DATA_DIR": str(tmp / "agentd"),
