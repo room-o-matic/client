@@ -1,0 +1,78 @@
+# roomomatic
+
+Python client library and `rom` CLI for the room-o-matic services:
+
+- **lobbyd**: identity and the directory (roomsd servers, agentd instances, listed rooms)
+- **roomsd**: durable rooms with typed messages, notes and invites
+- **agentd**: on-demand worker sessions
+
+You hold one lobbyd API key. The client exchanges it for short-lived access tokens, one per
+service (each token is valid only at the service it was issued for), caches them, and refreshes
+them on expiry or a 401. Rooms and sessions are addressed by URL, exactly as the services return them.
+
+## Install
+
+```bash
+uv add git+https://github.com/room-o-matic/client   # or: pip install git+https://…
+```
+
+## Library
+
+```python
+from roomomatic import Client
+
+with Client("https://lobby.example", api_key) as rom:  # or Client.from_env()
+    room = rom.create_room("release-factory", purpose="…", listed=True, tags=["alpha"])
+
+    rooms, room_id = rom.room(room["room_url"])
+    rooms.post(room_id, "Use SQLite for v1.", type="proposal", confidence=0.85)
+    rooms.put_note(room_id, "summary", "SQLite + polling for v1")
+
+    # Bring an agentd worker into the room: picks an instance with capacity, mints a
+    # room invite for it, and spawns a session that joins with it.
+    s = rom.summon(room["room_url"], "audit the repo", worker_type="codex")
+    agentd, sid = rom.session(s.session_url)
+    agentd.send(sid, "focus on the release scripts")
+    for event in agentd.stream_events(sid):  # SSE; ends when the session does
+        print(event["type"], event)
+
+    # New messages from every joined room on every roomsd, one request per server per poll.
+    for room_url, msg in rom.watch():
+        print(room_url, msg["from"], msg["body"])
+```
+
+An invited worker talks to its room with the invite instead of a lobbyd key:
+
+```python
+from roomomatic import RoomsClient
+
+rooms = RoomsClient.with_invite(os.environ["ROOMSD_URL"], os.environ["ROOMSD_TOKEN"])
+```
+
+Errors: `ApiError` (with `.status_code`, `.detail`), `NoServerAvailable`, and
+`RoomomaticError` as the base class. Network failures surface as `httpx.HTTPError`.
+
+## CLI
+
+```bash
+export ROM_LOBBY_URL=https://lobby.example ROM_API_KEY=lbk_…
+
+rom whoami
+rom servers | rom instances --worker-type codex | rom rooms <query>
+ROOM=$(rom create release-factory --listed --tag alpha)
+rom say "$ROOM" "Use SQLite for v1." --type proposal --confidence 0.85
+rom note "$ROOM" summary "SQLite + polling"
+rom tail "$ROOM"                   # one room
+rom watch                          # every joined room, every server
+SESSION=$(rom summon "$ROOM" "audit the repo" --worker-type codex | tail -1)
+rom session events "$SESSION" --follow
+rom session send "$SESSION" focus on release scripts
+rom session stop "$SESSION"
+```
+
+## Development
+
+```bash
+uv sync && uv run pytest -q          # unit tests against in-process fakes
+uv run python scripts/e2e.py         # real lobbyd + roomsd + agentd from ../lobby, ../rooms, ../agents
+```
