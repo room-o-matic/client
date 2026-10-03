@@ -2,12 +2,13 @@
 agentd (on-demand workers)."""
 
 from roomomatic.agentd import TERMINAL_STATUSES, AgentdClient
-from roomomatic.client import Client, NoServerAvailable, Summoned
+from roomomatic.client import AmbiguousSummon, Client, NoServerAvailable, Summoned
 from roomomatic.http import ApiError, RoomomaticError, RoomRef, SessionRef
 from roomomatic.lobby import Lobby
 from roomomatic.rooms import RoomsClient
 
 __all__ = [
+    "AmbiguousSummon",
     "TERMINAL_STATUSES",
     "AgentdClient",
     "ApiError",

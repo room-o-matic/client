@@ -35,6 +35,13 @@ class FakeWorld:
         self.messages: dict[str, list[dict]] = defaultdict(list)  # roomsd url -> messages
         self.spawn_status = 201
         self.invites: dict[str, dict] = {}
+        # docs#13 fault injection
+        self.sessions_by_op: dict[str, dict] = {}  # agentd's durable idempotency records
+        self.spawn_calls = 0
+        self.drop_spawn_response = False  # commit the spawn, then lose the response
+        self.agentd_unreachable = False  # every agentd request fails at transport level
+        self.roomsd_delete_down = False  # invite revocation fails at transport level
+        self.status_by_host: dict[str, int] = {}  # per-agentd forced spawn status
         # Audiences lobbyd will mint tokens for (operator-approved endpoints, docs#5).
         self.approved = {"http://rooms-a.test", "http://rooms-b.test", "http://agentd-1.test"}
 
@@ -50,6 +57,10 @@ class FakeWorld:
         origin = f"{req.url.scheme}://{req.url.host}"
         if origin == LOBBY:
             return self.lobby(req, body)
+        if "agentd" in origin and self.agentd_unreachable:
+            raise httpx.ConnectError("agentd unreachable", request=req)
+        if "rooms" in origin and req.method == "DELETE" and self.roomsd_delete_down:
+            raise httpx.ConnectError("roomsd unreachable", request=req)
         token = (auth or "").removeprefix("Bearer ")
         if token in self.revoked_tokens or not token.startswith(f"tok:{origin}:"):
             return httpx.Response(401, json={"detail": "bad token"})
@@ -94,7 +105,12 @@ class FakeWorld:
             return httpx.Response(
                 201, json={"room_id": "room_1", "room_url": f"{origin}/v1/rooms/room_1"}
             )
+        if req.method == "GET" and p.endswith("/invites"):
+            return httpx.Response(200, json=list(self.invites.values()))
         if req.method == "POST" and p.endswith("/invites"):
+            agent = f"missy@test/{body['name']}"
+            if any(i["agent"] == agent and not i.get("revoked_at") for i in self.invites.values()):
+                return httpx.Response(409, json={"detail": "already has a live invite"})
             inv = {
                 "invite_id": f"inv_{len(self.invites) + 1}",
                 "agent": f"missy@test/{body['name']}",
@@ -104,6 +120,9 @@ class FakeWorld:
             self.invites[inv["invite_id"]] = inv
             return httpx.Response(201, json=inv)
         if req.method == "DELETE" and "/invites/" in p:
+            inv_id = p.rsplit("/", 1)[1]
+            if inv_id in self.invites:
+                self.invites[inv_id]["revoked_at"] = "now"
             return httpx.Response(200, json={"revoked_at": "now"})
         if p == "/v1/me/updates":
             cursor = int(req.url.params.get("cursor", 0))
@@ -122,12 +141,29 @@ class FakeWorld:
     def agentd(self, origin, req, body):
         p = req.url.path
         if req.method == "POST" and p == "/v1/sessions":
-            if self.spawn_status != 201:
-                return httpx.Response(self.spawn_status, json={"detail": "at capacity"})
-            return httpx.Response(
-                201,
-                json={"session_id": "agt_1", "instance_id": "agentd-host1", "status": "starting"},
-            )
+            forced = self.status_by_host.get(origin, self.spawn_status)
+            if forced != 201:
+                return httpx.Response(forced, json={"detail": "at capacity"})
+            op = body.get("operation_id")
+            if op and op in self.sessions_by_op:
+                return httpx.Response(200, json={**self.sessions_by_op[op], "replayed": True})
+            self.spawn_calls += 1
+            session = {
+                "session_id": f"agt_{self.spawn_calls}",
+                "instance_id": "agentd-host1" if "agentd-1" in origin else "agentd-host2",
+                "status": "starting",
+                "operation_id": op,
+            }
+            if op:
+                self.sessions_by_op[op] = session
+            if self.drop_spawn_response:
+                raise httpx.ReadTimeout("response lost after commit", request=req)
+            return httpx.Response(201, json=session)
+        if p.startswith("/v1/sessions/by-operation/"):
+            op = p.rsplit("/", 1)[1]
+            if op in self.sessions_by_op:
+                return httpx.Response(200, json=self.sessions_by_op[op])
+            return httpx.Response(404, json={"detail": "no session for that operation_id"})
         if p == "/v1/instance":
             return httpx.Response(200, json={"instance_id": "agentd-pinned", "base_url": "x"})
         if p.endswith("/events"):
@@ -156,4 +192,5 @@ def world() -> FakeWorld:
 @pytest.fixture
 def rom(world) -> Client:
     with Client(LOBBY, "lbk_missy", transport=world.transport()) as c:
+        c.reconcile_backoff = 0  # no real sleeping in tests
         yield c
