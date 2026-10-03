@@ -1,3 +1,5 @@
+import re
+
 import httpx
 import pytest
 
@@ -62,11 +64,12 @@ def test_create_room_picks_a_server(rom, world):
 def test_summon_flow(rom, world):
     s = rom.summon("http://rooms-a.test/v1/rooms/room_1", "do it", worker_type="fake")
     assert s.session_url == "http://agentd-1.test/v1/sessions/agt_1"
-    assert s.worker_identity == "missy@test/agentd-host1.fake"
+    assert re.fullmatch(r"missy@test/agentd-host1\.fake-[0-9a-f]{6}", s.worker_identity)
     assert s.room_url == "http://rooms-a.test/v1/rooms/room_1"
 
     ((_, _, _, invite),) = world.calls("POST", "/invites")
-    assert invite == {"name": "agentd-host1.fake", "role": "implementer", "ttl_seconds": None}
+    assert invite["name"] == s.worker_identity.split("/", 1)[1]
+    assert (invite["role"], invite["ttl_seconds"]) == ("implementer", None)
     ((_, _, _, spawn),) = world.calls("POST", "agentd-1.test/v1/sessions")
     assert spawn["room"] == {
         "room_url": "http://rooms-a.test/v1/rooms/room_1",
@@ -104,7 +107,7 @@ def test_summon_pinned_instance_skips_registry(rom, world):
         worker_type="fake",
         instance_url="http://agentd-1.test/",
     )
-    assert s.worker_identity == "missy@test/agentd-pinned.fake"
+    assert s.worker_identity.startswith("missy@test/agentd-pinned.fake-")
     assert world.calls("GET", "/v1/registry/agentd") == []
 
 
@@ -167,3 +170,14 @@ def test_transport_errors_surface(world):
     c = Client("http://lobby.test", "k", transport=httpx.MockTransport(boom))
     with pytest.raises(httpx.ConnectError):
         c.lobby.whoami()
+
+
+def test_summon_default_names_are_unique(rom, world):
+    url = "http://rooms-a.test/v1/rooms/room_1"
+    names = {rom.summon(url, "t", worker_type="fake").worker_identity for _ in range(5)}
+    assert len(names) == 5
+
+
+def test_summon_explicit_name_is_kept(rom, world):
+    s = rom.summon("http://rooms-a.test/v1/rooms/room_1", "t", worker_type="fake", name="rev")
+    assert s.worker_identity == "missy@test/rev"

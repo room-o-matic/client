@@ -156,7 +156,10 @@ def main() -> None:
         rooms_b.post(room_id, "Use SQLite for v1.", type="proposal", confidence=0.8)
 
         summoned = missy.summon(room["room_url"], "interactive", worker_type="fake")
-        check(summoned.worker_identity == f"missy@{DOMAIN}/agentd-e2e.fake", "worker identity")
+        check(
+            summoned.worker_identity.startswith(f"missy@{DOMAIN}/agentd-e2e.fake-"),
+            "worker identity",
+        )
         agentd, sid = missy.session(summoned.session_url)
         wait_for(lambda: agentd.session(sid)["status"] == "running", "session running")
         wait_for(
