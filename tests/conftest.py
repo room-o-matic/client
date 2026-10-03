@@ -35,6 +35,8 @@ class FakeWorld:
         self.messages: dict[str, list[dict]] = defaultdict(list)  # roomsd url -> messages
         self.spawn_status = 201
         self.invites: dict[str, dict] = {}
+        # Audiences lobbyd will mint tokens for (operator-approved endpoints, docs#5).
+        self.approved = {"http://rooms-a.test", "http://rooms-b.test", "http://agentd-1.test"}
 
     # ----- plumbing -----
 
@@ -64,6 +66,8 @@ class FakeWorld:
         p = req.url.path
         if p == "/v1/token":
             aud = body["audience"]
+            if aud not in self.approved:
+                return httpx.Response(403, json={"detail": f"{aud} is not approved"})
             self.issued[aud] += 1
             return httpx.Response(
                 200,

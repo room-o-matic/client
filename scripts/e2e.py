@@ -59,15 +59,17 @@ def services():
         "LOBBYD_DOMAIN": DOMAIN,
     }
 
-    def key(name: str, scope: str) -> str:
+    def key(name: str, scope: str, endpoint: str | None = None) -> str:
         cmd = [bin_("lobby", "lobbyd"), "key", "create", name, "--scope", scope]
+        if endpoint:  # operator approval of the service endpoint (docs#5)
+            cmd += ["--endpoint", endpoint]
         return subprocess.check_output(cmd, env=lobby_env, text=True).strip()
 
     keys = {
         "missy": key("missy", "agent"),
         "boostie": key("boostie", "agent"),
-        "rooms": key("rooms-a", "roomsd"),
-        "agentd": key("agentd-e2e", "agentd"),
+        "rooms": key("rooms-a", "roomsd", urls["rooms"]),
+        "agentd": key("agentd-e2e", "agentd", urls["agentd"]),
     }
     procs = [
         subprocess.Popen(

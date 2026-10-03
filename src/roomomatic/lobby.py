@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from roomomatic.http import Service, TokenSource
+from roomomatic.http import Service, TokenSource, service_url
 
 # Refresh an access token when less than this many seconds of life remain.
 REFRESH_MARGIN_SECONDS = 60
@@ -28,7 +28,7 @@ class Lobby(Service):
     def token(self, audience: str, *, force: bool = False) -> str:
         """An access token valid only at `audience` (a service base URL), cached until
         close to expiry."""
-        audience = audience.rstrip("/")
+        audience = service_url(audience)
         with self._lock:
             cached = self._tokens.get(audience)
             if cached and not force and cached[1] - time.time() > REFRESH_MARGIN_SECONDS:

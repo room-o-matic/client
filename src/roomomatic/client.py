@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import httpx
 
 from roomomatic.agentd import AgentdClient
-from roomomatic.http import ApiError, RoomomaticError, RoomRef, SessionRef
+from roomomatic.http import ApiError, RoomomaticError, RoomRef, SessionRef, service_url
 from roomomatic.lobby import Lobby
 from roomomatic.rooms import RoomsClient
 
@@ -65,7 +65,7 @@ class Client:
     # ----- per-service clients (tokens fetched and refreshed per audience) ---------------
 
     def roomsd(self, base_url: str) -> RoomsClient:
-        base_url = base_url.rstrip("/")
+        base_url = service_url(base_url)
         if base_url not in self._rooms:
             self._rooms[base_url] = RoomsClient(
                 base_url, self.lobby.token_source(base_url), transport=self._transport
@@ -73,7 +73,7 @@ class Client:
         return self._rooms[base_url]
 
     def agentd(self, base_url: str) -> AgentdClient:
-        base_url = base_url.rstrip("/")
+        base_url = service_url(base_url)
         if base_url not in self._agentds:
             self._agentds[base_url] = AgentdClient(
                 base_url, self.lobby.token_source(base_url), transport=self._transport
@@ -140,9 +140,13 @@ class Client:
         rooms, room_id = self.room(room_url)
         if instance_url:
             instance = self.agentd(instance_url).instance()
-            instance["base_url"] = instance_url.rstrip("/")
+            instance["base_url"] = service_url(instance_url)
         else:
             instance = self.pick_agentd(worker_type, profile)
+        # Get the access token for the chosen instance before minting the invite: lobbyd
+        # only issues tokens for operator-approved endpoints, so an unapproved destination
+        # fails here and never receives a task or room capability (docs#5).
+        self.lobby.token(instance["base_url"])
         # roomsd allows one live invite per guest identity, so the default name is unique
         # per summon. Pass `name` for a stable identity (e.g. to rotate a credential).
         worker_name = name or f"{instance['instance_id']}.{worker_type}-{secrets.token_hex(3)}"
