@@ -42,6 +42,8 @@ class FakeWorld:
         self.agentd_unreachable = False  # every agentd request fails at transport level
         self.roomsd_delete_down = False  # invite revocation fails at transport level
         self.status_by_host: dict[str, int] = {}  # per-agentd forced spawn status
+        self.down_hosts: set[str] = set()  # docs#14: any request to these fails (transport)
+        self.directory_down = False
         # Audiences lobbyd will mint tokens for (operator-approved endpoints, docs#5).
         self.approved = {"http://rooms-a.test", "http://rooms-b.test", "http://agentd-1.test"}
 
@@ -55,7 +57,11 @@ class FakeWorld:
         auth = req.headers.get("authorization")
         self.requests.append((req.method, str(req.url), auth, body))
         origin = f"{req.url.scheme}://{req.url.host}"
+        if origin in self.down_hosts:
+            raise httpx.ConnectError(f"{origin} unreachable", request=req)
         if origin == LOBBY:
+            if self.directory_down and req.url.path == "/v1/servers/roomsd":
+                raise httpx.ConnectError("lobbyd unreachable", request=req)
             return self.lobby(req, body)
         if "agentd" in origin and self.agentd_unreachable:
             raise httpx.ConnectError("agentd unreachable", request=req)
