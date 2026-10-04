@@ -42,6 +42,7 @@ class FakeWorld:
         self.agentd_unreachable = False  # every agentd request fails at transport level
         self.roomsd_delete_down = False  # invite revocation fails at transport level
         self.status_by_host: dict[str, int] = {}  # per-agentd forced spawn status
+        self.workspaces_by_host: dict[str, set] = {}  # per-agentd allowed workspace paths
         self.instance_names = {
             "http://agentd-1.test": "agentd-host1",
             "http://agentd-2.test": "agentd-host2",
@@ -194,6 +195,14 @@ class FakeWorld:
             forced = self.status_by_host.get(origin, self.spawn_status)
             if forced != 201:
                 return httpx.Response(forced, json={"detail": "at capacity"})
+            ws = (body.get("workspace") or {}).get("path")
+            if (
+                ws
+                and origin in self.workspaces_by_host
+                and ws not in self.workspaces_by_host[origin]
+            ):
+                detail = f"workspace {ws!r} is not under an allowed root"
+                return httpx.Response(403, json={"detail": detail})
             op = body.get("operation_id")
             if op and op in self.sessions_by_op:
                 return httpx.Response(200, json={**self.sessions_by_op[op], "replayed": True})
@@ -207,6 +216,7 @@ class FakeWorld:
             if op:
                 self.sessions_by_op[op] = session
             session["room"] = {k: v for k, v in (body.get("room") or {}).items() if k != "token"}
+            session["workspace"] = body.get("workspace")
             if self.spawn_fails_launch:
                 session["status"] = "failed"
             self.sessions_by_id[session["session_id"]] = session
@@ -222,8 +232,11 @@ class FakeWorld:
                 return httpx.Response(200, json=self.sessions_by_op[op])
             return httpx.Response(404, json={"detail": "no session for that operation_id"})
         if p == "/v1/instance":
-            pairs = [{"profile": "workspace_coder", "worker_type": "fake"}]
-            runtimes = {"workspace_coder": 7200}
+            pairs = [
+                {"profile": "workspace_coder", "worker_type": "fake"},
+                {"profile": "knowledge_read", "worker_type": "fake"},
+            ]
+            runtimes = {"workspace_coder": 7200, "knowledge_read": 1800}
             name = self.instance_names.get(origin, "agentd-pinned")
             caps = {
                 "protocol": "room-o-matic.agentd/1",

@@ -157,6 +157,7 @@ def cmd_summon(rom: Client, a) -> None:
         name=a.name,
         role=a.role,
         instance_url=a.instance,
+        workspace_path=a.workspace,
     )
     print(f"{s.worker_identity} on {s.instance_id}")
     print(s.session_url)
@@ -283,6 +284,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--name", help="worker name in the room (default <instance>.<worker>)")
     c.add_argument("--role", default="implementer")
     c.add_argument("--instance", help="agentd base URL (default: pick from the registry)")
+    c.add_argument(
+        "--workspace",
+        help="directory on the agentd host to mount as the worker's working dir"
+        " (read-only or read-write per --profile)",
+    )
     c = cmd("session", cmd_session, "status | send | stop | events of a session URL")
     c.add_argument("action", choices=["status", "send", "stop", "events"])
     c.add_argument("session_url")

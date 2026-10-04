@@ -92,6 +92,13 @@ class Summoned:
     operation_id: str | None = None
 
 
+def refuses_workspace(e: ApiError) -> bool:
+    """agentd's answer when a workspace isn't under its roots, the caller's grant, or isn't a
+    directory there (as opposed to a profile that allows no workspace at all)."""
+    text = str(e)
+    return e.status_code in (403, 422) and "workspace" in text and "does not allow" not in text
+
+
 class Client:
     def __init__(
         self,
@@ -205,6 +212,7 @@ class Client:
         invite_ttl_seconds: int | None = None,
         operation_id: str | None = None,
         max_attempts: int = 3,
+        workspace_path: str | None = None,
         **spawn_fields,
     ) -> Summoned:
         """Bring an agentd worker into a room: pick an instance, mint a room invite for it,
@@ -220,6 +228,12 @@ class Client:
           reconciliation can't reach agentd, AmbiguousSummon is raised and the invite is
           left in place: retry with the same operation_id and instance_url.
         Failed cleanups never replace the primary error; they're journaled and retried.
+
+        workspace_path: a directory **on the agentd host** to mount as the worker's working
+        directory (e.g. a repo as a knowledge base), read-only or read-write as the profile
+        says. It must be under that agentd's `workspace_roots` and the caller's grant. When
+        the instance is picked from the registry, one that refuses the workspace is skipped
+        like a full one.
         """
         self.retry_cleanups()
         op = operation_id or f"sum-{uuid.uuid4().hex}"
@@ -270,6 +284,7 @@ class Client:
                         "expires_at": invite.get("expires_at"),
                     },
                     operation_id=op,
+                    workspace_path=workspace_path,
                     **spawn_fields,
                 )
             except ApiError as e:  # definite: agentd answered and didn't start it
@@ -277,6 +292,8 @@ class Client:
                 last_error = e
                 if e.status_code == 429:
                     continue
+                if workspace_path and not instance_url and refuses_workspace(e):
+                    continue  # this host lacks the directory, or doesn't allow it
                 raise
             except httpx.TransportError as e:  # unknown: it may have started
                 found = self._reconcile(base, op, cause=e, invite_id=invite["invite_id"])
