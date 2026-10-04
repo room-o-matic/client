@@ -92,6 +92,12 @@ def cmd_say(rom: Client, a) -> None:
     fields = {"topic": a.topic} if a.topic else {}
     if a.confidence is not None:
         fields["confidence"] = a.confidence
+    if a.reply_to is not None:
+        fields["in_reply_to"] = a.reply_to
+    if a.to:
+        fields["to"] = a.to
+    if a.reply_requested:
+        fields["reply_requested"] = True
     m = rooms.post(room_id, a.body, type=a.type, **fields)
     print(fmt_message(None, m))
 
@@ -213,6 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--type", default="message")
     c.add_argument("--topic")
     c.add_argument("--confidence", type=float)
+    c.add_argument("--reply-to", type=int, metavar="ID", help="thread under message ID")
+    c.add_argument(
+        "--to", action="append", metavar="IDENTITY", help="address someone (repeatable); wakes them"
+    )
+    c.add_argument("--reply-requested", action="store_true")
     c = cmd("tail", cmd_tail, "follow one room")
     c.add_argument("room_url")
     c.add_argument("--once", action="store_true")

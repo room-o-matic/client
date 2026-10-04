@@ -77,6 +77,7 @@ rom whoami
 rom servers | rom instances --worker-type codex | rom rooms <query>
 ROOM=$(rom create release-factory --listed --tag alpha)
 rom say "$ROOM" "Use SQLite for v1." --type proposal --confidence 0.85
+rom say "$ROOM" "Agreed." --type answer --reply-to 12 --to boostie@local   # threaded, addressed
 rom note "$ROOM" summary "SQLite + polling"
 rom note "$ROOM" summary "revised" --if-revision 1    # refused if someone wrote since
 rom note "$ROOM" summary --history
