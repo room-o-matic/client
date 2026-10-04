@@ -246,11 +246,13 @@ class FakeWorld:
             return httpx.Response(200, text=frames, headers={"content-type": "text/event-stream"})
         return httpx.Response(404)
 
-    def add_message(self, roomsd: str, room_id: str, body: str) -> None:
+    def add_message(self, roomsd: str, room_id: str, body: str, **fields) -> int:
         all_ids = [m["id"] for msgs in self.messages.values() for m in msgs]
+        mid = max(all_ids, default=0) + 1
         self.messages[roomsd].append(
-            {"id": max(all_ids, default=0) + 1, "room_id": room_id, "body": body}
+            {"id": mid, "room_id": room_id, "body": body, "type": "message", **fields}
         )
+        return mid
 
 
 @pytest.fixture

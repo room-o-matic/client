@@ -6,6 +6,7 @@ addressed by URL, exactly as the services return them.
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -183,6 +184,25 @@ def cmd_session(rom: Client, a) -> None:
 # ----- parser ---------------------------------------------------------------------------
 
 
+def cmd_mcp(rom: Client, a) -> None:
+    try:
+        from roomomatic.mcp import RomTools, build_server
+    except ImportError:
+        raise RoomomaticError("rom mcp needs the MCP SDK: install roomomatic[mcp]") from None
+    build_server(RomTools(rom, dispatch_url=os.environ.get("ROM_DISPATCH_URL"))).run("stdio")
+
+
+def cmd_inbox(rom: Client, a) -> None:
+    from roomomatic.inbox import Inbox, format_items, hook_output
+
+    items = Inbox(rom).check(everything=a.all)
+    if a.hook:
+        if out := hook_output(items):
+            print(out)
+        return
+    print(format_items(items) if items else "nothing new")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="rom", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="command", required=True)
@@ -224,6 +244,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--to", action="append", metavar="IDENTITY", help="address someone (repeatable); wakes them"
     )
     c.add_argument("--reply-requested", action="store_true")
+    cmd("mcp", cmd_mcp, "serve room-o-matic as MCP tools (Claude Code etc.), as you")
+    c = cmd("inbox", cmd_inbox, "what's new for you: mentions, replies, messages to you")
+    c.add_argument("--all", action="store_true", help="every new message, not just yours")
+    c.add_argument(
+        "--hook",
+        action="store_true",
+        help="output for a Claude Code UserPromptSubmit hook; never fails",
+    )
     c = cmd("tail", cmd_tail, "follow one room")
     c.add_argument("room_url")
     c.add_argument("--once", action="store_true")
@@ -270,7 +298,8 @@ def main(argv: list[str] | None = None) -> int:
             args.func(rom, args)
     except (RoomomaticError, httpx.HTTPError) as e:
         print(f"rom: {e}", file=sys.stderr)
-        return 1
+        # A prompt hook must never block or break the user's prompt.
+        return 0 if getattr(args, "hook", False) else 1
     except KeyboardInterrupt:
         return 130
     return 0
