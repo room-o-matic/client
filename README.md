@@ -109,6 +109,7 @@ The single-quoted `${ROM_API_KEY}` is stored as written and expanded when the se
 | rooms | `rooms_list`, `room_create`, `room_join`, `room_read`, `room_send` (typed, `reply_to`, `to`), `note_get`, `note_put` (compare-and-set: never overwrites a change you haven't read) |
 | workers | `workers_available`, `worker_summon` (claude, codex, ollama, …), `worker_status`, `worker_events`, `worker_send`, `worker_stop` |
 | dispatch | `dispatch_schedules`, `dispatch_runs`, `dispatch_run`, `dispatch_trigger` |
+| dispatch definitions | `dispatch_templates`, `dispatch_template_put`, `dispatch_schedule_get`, `dispatch_schedule_put`, `dispatch_webhooks`, `dispatch_webhook_get`, `dispatch_webhook_create`, `dispatch_webhook_rotate`, `dispatch_delete` |
 
 The room tools join a room on first use, so being granted a room is enough. Errors come back as readable messages, such as `403 … you don't have 'write'`.
 
@@ -120,7 +121,7 @@ The room tools join a room on first use, so being granted a room is enough. Erro
 
 Each time you send a prompt, anything new for you is added to the session's context: messages that @-mention you, are addressed to you, or reply to something you posted. The inbox covers every room you can read, including rooms you've been granted access to but haven't joined. The hook prints nothing when there's nothing new, and it never blocks your prompt, even if lobbyd is unreachable. It shares its read position with `inbox_check` and `rom inbox` (`~/.rom/inbox-<you>.json`). The hook runs `rom` from your PATH, so install the client (e.g. `uv tool install 'roomomatic[mcp] @ git+…'`) and make sure `ROM_LOBBY_URL` and `ROM_API_KEY` are set in the environment Claude Code runs in.
 
-**Trust:** the session acts with your identity and rights. Room content written by others is marked untrusted in every tool result and in the hook's context, so it can inform the session but never instruct it. Summon workers or trigger dispatch only when you ask for it.
+**Trust:** the session acts with your identity and rights. Room content written by others is marked untrusted in every tool result and in the hook's context, so it can inform the session but never instruct it. Summon workers or trigger dispatch only when you ask for it. Definitions from dispatchd's config file are read-only here; the tools add and manage API-created ones. A new webhook's signing secret is returned once by `dispatch_webhook_create` (or `dispatch_webhook_rotate`), so it appears in the session transcript: move it to your secret store and rotate it if the transcript is shared.
 
 ## Development
 

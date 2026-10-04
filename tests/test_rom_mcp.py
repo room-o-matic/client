@@ -106,13 +106,13 @@ def server(rom, inbox):
     return build_server(RomTools(rom, inbox=inbox))
 
 
-def call(server, name, **args):
-    return asyncio.run(server.call_tool(name, args))
+def call(server, tool, /, **args):
+    return asyncio.run(server.call_tool(tool, args))
 
 
-def failure(server, name, **args) -> str:
+def failure(server, tool, /, **args) -> str:
     with pytest.raises(ToolError) as e:
-        call(server, name, **args)
+        call(server, tool, **args)
     assert not isinstance(e.value, UnexpectedToolError)  # a readable error, not "crashed"
     return str(e.value)
 
@@ -172,3 +172,90 @@ def test_room_tools_join_on_first_use(world, rom, inbox):
     tools = RomTools(rom, inbox=inbox)
     assert tools.note_put(f"{ROOMS}/v1/rooms/room_1", "plan", ["a"])["written"]
     assert joined == ["/v1/rooms/room_1/participants"]
+
+
+# ----- dispatch definitions --------------------------------------------------------------
+
+DISPATCH = "http://dispatch.test"
+
+
+class FakeDispatch:
+    """Just enough of dispatchd's operator API to check what the tools send and return."""
+
+    def __init__(self):
+        self.defs = {"templates": {}, "schedules": {}, "webhooks": {}}
+        self.seen = []
+
+    def __call__(self, req):
+        import httpx
+
+        body = json.loads(req.content) if req.content else None
+        self.seen.append((req.method, req.url.path, body))
+        parts = req.url.path.strip("/").split("/")[1:]  # drop "v1"
+        kind, name = parts[0], parts[1] if len(parts) > 1 else None
+        items = self.defs[kind]
+        if req.method == "GET":
+            if name is None:
+                return httpx.Response(200, json=[{"name": n, **b} for n, b in items.items()])
+            if name not in items:
+                return httpx.Response(404, json={"detail": f"no {kind[:-1]} {name!r}"})
+            return httpx.Response(200, json={"name": name, "source": "api", **items[name]})
+        if req.method == "DELETE":
+            if body is None and items.pop(name, None) is None:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(204)
+        if parts[-1] == "rotate-secret":
+            return httpx.Response(200, json={"name": name, "secret": "whsec_new"})
+        if kind == "schedules" and body["use"] not in self.defs["templates"]:
+            return httpx.Response(422, json={"detail": f"unknown template {body['use']!r}"})
+        items[name] = body
+        if kind == "webhooks":
+            return httpx.Response(201, json={"name": name, **body, "secret": "whsec_once"})
+        return httpx.Response(200, json={"name": name, "source": "api", **body})
+
+
+@pytest.fixture
+def dispatch_tools(world, inbox):
+    import httpx
+
+    from roomomatic.client import Client
+
+    fake = FakeDispatch()
+    world.approved.add(DISPATCH)
+
+    def handle(req):
+        if req.url.host == "dispatch.test":
+            return fake(req)
+        return world.handle(req)
+
+    with Client("http://lobby.test", "lbk_missy", transport=httpx.MockTransport(handle)) as c:
+        yield RomTools(c, inbox=inbox, dispatch_url=DISPATCH), fake
+
+
+def test_dispatch_definitions_round_trip(dispatch_tools):
+    tools, fake = dispatch_tools
+    tmpl = {"workers": [{"name": "codex", "worker_type": "codex", "profile": "ro"}]}
+    assert tools.dispatch_template_put("solo", tmpl)["source"] == "api"
+    assert [t["name"] for t in tools.dispatch_templates()] == ["solo"]
+    tools.dispatch_schedule_put("nightly", "30 2 * * *", "solo", "Sweep.", timezone="UTC")
+    assert fake.seen[-1] == (
+        "PUT",
+        "/v1/schedules/nightly",
+        {"cron": "30 2 * * *", "use": "solo", "goal": "Sweep.", "timezone": "UTC", "enabled": True},
+    )
+    assert tools.dispatch_schedule_get("nightly")["cron"] == "30 2 * * *"
+    hook = tools.dispatch_webhook_create("ask", "solo", task_template="Q: {prompt}")
+    assert hook["secret"] == "whsec_once" and "only now" in hook["note"]
+    assert tools.dispatch_webhook_get("ask")["task_template"] == "Q: {prompt}"
+    assert [w["name"] for w in tools.dispatch_webhooks()] == ["ask"]
+    assert tools.dispatch_webhook_rotate("ask")["secret"] == "whsec_new"
+    assert tools.dispatch_delete("webhook", "ask") == {"deleted": "webhook ask"}
+    assert fake.seen[-1][:2] == ("DELETE", "/v1/webhooks/ask")
+
+
+def test_dispatch_refusals_are_readable(dispatch_tools):
+    tools, _ = dispatch_tools
+    server = build_server(tools)
+    args = {"name": "s", "cron": "0 9 * * *", "use": "nope", "goal": "g"}
+    assert "unknown template" in failure(server, "dispatch_schedule_put", **args)
+    assert "404" in failure(server, "dispatch_schedule_get", name="missing")
