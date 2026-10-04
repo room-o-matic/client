@@ -21,9 +21,23 @@ def out(obj) -> None:
 
 
 def fmt_message(room_url: str | None, m: dict) -> str:
+    """One line per message, with the typed fields that change how it should be read:
+    what it replies to, who it's addressed to, confidence and severity."""
     where = f"{room_url} " if room_url else ""
     topic = f" ({m['topic']})" if m.get("topic") else ""
-    return f"{where}[{m['id']}] {m['from']} {m['type']}{topic}: {m['body']}"
+    meta = []
+    if m.get("in_reply_to") is not None:
+        meta.append(f"re:#{m['in_reply_to']}")
+    if m.get("to"):
+        meta.append("to:" + ",".join(m["to"]))
+    if m.get("confidence") is not None:
+        meta.append(f"conf={m['confidence']:g}")
+    if m.get("severity"):
+        meta.append(f"severity={m['severity']}")
+    if m.get("reply_requested"):
+        meta.append("reply-requested")
+    extra = f" [{' '.join(meta)}]" if meta else ""
+    return f"{where}[{m['id']}] {m['from']} {m['type']}{topic}{extra}: {m['body']}"
 
 
 def fmt_event(e: dict) -> str:
