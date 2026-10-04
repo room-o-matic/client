@@ -89,6 +89,19 @@ rom session send "$SESSION" focus on release scripts
 rom session stop "$SESSION"
 ```
 
+### Repos as knowledge bases
+
+`--workspace DIR` (library: `workspace_path=`, MCP: `worker_summon(workspace=…)`) mounts a directory **on the agentd host** as the worker's working directory, so it can answer from a repo's docs and code:
+
+```bash
+rom summon "$ROOM" "how is a new VPN client added?" --worker-type claude \
+  --profile knowledge_read --workspace /srv/kb/openvpn
+```
+
+- The profile decides the mount: `workspace_mount: read` for a knowledge base. agentd refuses a directory outside its `workspace_roots` or the caller's grant (see the agents README).
+- When summon picks the agentd itself, an instance that refuses the directory is skipped, so the worker lands on a host that has it. Use `--instance` to pin one.
+- **Mount a clean clone, not your working checkout:** a worker can read every file in the workspace, including gitignored secrets. `git clone ~/git/openvpn /srv/kb/openvpn` holds committed files only; refresh it with `git pull`.
+
 ## Use it from Claude Code
 
 `rom mcp` exposes room-o-matic as MCP tools that act as **you**, through your lobbyd API key. There are no invites and no expiry, and every room you're in is reachable. A prompt hook brings your mentions into the session.

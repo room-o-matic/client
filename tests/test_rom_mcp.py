@@ -259,3 +259,16 @@ def test_dispatch_refusals_are_readable(dispatch_tools):
     args = {"name": "s", "cron": "0 9 * * *", "use": "nope", "goal": "g"}
     assert "unknown template" in failure(server, "dispatch_schedule_put", **args)
     assert "404" in failure(server, "dispatch_schedule_get", name="missing")
+
+
+def test_worker_summon_can_mount_a_knowledge_base(world, rom, inbox):
+    tools = RomTools(rom, inbox=inbox)
+    out = tools.worker_summon(
+        f"{ROOMS}/v1/rooms/room_1",
+        "explain",
+        "fake",
+        profile="knowledge_read",
+        workspace="/srv/kb/openvpn",
+    )
+    sid = out["session_url"].rsplit("/", 1)[1]
+    assert world.sessions_by_id[sid]["workspace"]["path"] == "/srv/kb/openvpn"

@@ -264,3 +264,45 @@ def test_incompatibility_rules():
     assert "pre-docs#15" in incompatibility({}, profile="p", worker_type="w")
     v2 = {"capabilities": {**ok["capabilities"], "protocol": "room-o-matic.agentd/2"}}
     assert "protocol" in incompatibility(v2, profile="p", worker_type="w")
+
+
+ROOM = "http://rooms-a.test/v1/rooms/room_1"
+KB = "/srv/kb/openvpn"
+
+
+def two_instances(world):
+    world.instances.append(
+        {
+            "instance_id": "agentd-host2",
+            "base_url": "http://agentd-2.test",
+            "worker_types": ["fake"],
+            "max_sessions": 4,
+            "active_sessions": 0,
+        }
+    )
+    world.approved.add("http://agentd-2.test")
+
+
+def test_summon_mounts_a_workspace(rom, world):
+    s = rom.summon(ROOM, "t", worker_type="fake", profile="knowledge_read", workspace_path=KB)
+    assert world.sessions_by_id[s.session_id]["workspace"] == {"mode": "mount", "path": KB}
+
+
+def test_summon_skips_an_instance_without_the_workspace(rom, world):
+    two_instances(world)
+    world.workspaces_by_host["http://agentd-1.test"] = set()  # host1 doesn't have it
+    s = rom.summon(ROOM, "t", worker_type="fake", workspace_path=KB)
+    assert s.instance_id == "agentd-host2"
+    invites = world.calls("POST", "/invites")
+    assert len(invites) == 2 and len(world.calls("DELETE", "/invites/")) == 1  # first revoked
+
+
+def test_a_pinned_instance_refusing_the_workspace_is_an_error(rom, world):
+    from roomomatic import ApiError
+
+    two_instances(world)
+    world.workspaces_by_host["http://agentd-1.test"] = set()
+    with pytest.raises(ApiError, match="not under an allowed root"):
+        rom.summon(
+            ROOM, "t", worker_type="fake", workspace_path=KB, instance_url="http://agentd-1.test"
+        )

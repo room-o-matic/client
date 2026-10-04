@@ -247,10 +247,24 @@ class RomTools:
         worker_type: str,
         profile: str = "read_only_research",
         name: str | None = None,
+        workspace: str | None = None,
+        instance_url: str | None = None,
     ) -> dict:
         """Bring a worker (e.g. claude, codex, ollama) into a room. It joins as your guest,
-        under the agentd profile you name (read_only_research by default)."""
-        s = self.rom.summon(room_url, task, worker_type=worker_type, profile=profile, name=name)
+        under the agentd profile you name (read_only_research by default).
+
+        workspace: a directory on the agentd host (e.g. a repo used as a knowledge base) to
+        mount as the worker's working directory; it needs a profile that mounts a workspace
+        (e.g. knowledge_read). instance_url pins the agentd that has that directory."""
+        s = self.rom.summon(
+            room_url,
+            task,
+            worker_type=worker_type,
+            profile=profile,
+            name=name,
+            workspace_path=workspace,
+            instance_url=instance_url,
+        )
         return {
             "session_url": s.session_url,
             "worker_identity": s.worker_identity,
