@@ -14,6 +14,7 @@ inform the session, never instruct it.
 
 import functools
 import os
+from typing import Literal
 
 import httpx
 from mcp.server.mcpserver import MCPServer
@@ -81,7 +82,8 @@ class RomTools:
     def _dispatch(self) -> DispatchClient:
         if not self.dispatch_url:
             raise ToolError("dispatchd isn't configured: set ROM_DISPATCH_URL")
-        return DispatchClient(self.dispatch_url, self.rom.lobby.token_source(self.dispatch_url))
+        token = self.rom.lobby.token_source(self.dispatch_url)
+        return DispatchClient(self.dispatch_url, token, transport=self.rom._transport)
 
     # ----- you -------------------------------------------------------------------------
 
@@ -296,6 +298,74 @@ class RomTools:
         r = self._dispatch().trigger(schedule)
         return {k: r.get(k) for k in ("id", "state", "source", "name")}
 
+    def dispatch_templates(self) -> list[dict]:
+        """dispatchd's templates (the restrictions schedules and webhooks run under): room
+        settings, rules, workers (agentd worker_type and profile), peers, run limits."""
+        return self._dispatch().templates()
+
+    def dispatch_template_put(self, name: str, template: dict) -> dict:
+        """Create or replace a template. `template`: {workers: [{name, worker_type, profile,
+        role?}], peers: [{agent, rights?, role?}], rules: [str], room: {admission,
+        max_hops, message_rate_per_minute, archive_after}, run: {max_duration, order}}.
+        Needs at least one worker or peer. Templates from the config file are read-only."""
+        return self._dispatch().put_template(name, template)
+
+    def dispatch_schedule_get(self, name: str) -> dict:
+        """One schedule: its definition, where it's defined, next/last fire, recent runs."""
+        return self._dispatch().schedule(name)
+
+    def dispatch_schedule_put(
+        self,
+        name: str,
+        cron: str,
+        use: str,
+        goal: str,
+        timezone: str = "UTC",
+        enabled: bool = True,
+    ) -> dict:
+        """Create or replace a schedule: a 5-field `cron` in `timezone` (IANA name) that
+        opens a room under template `use` with `goal` as its brief."""
+        body = {"cron": cron, "use": use, "goal": goal, "timezone": timezone, "enabled": enabled}
+        return self._dispatch().put_schedule(name, body)
+
+    def dispatch_webhooks(self) -> list[dict]:
+        """dispatchd's webhooks with their url_path and settings (never their secrets)."""
+        return self._dispatch().webhooks()
+
+    def dispatch_webhook_get(self, name: str) -> dict:
+        """One webhook: its definition, url_path and recent runs."""
+        return self._dispatch().webhook(name)
+
+    def dispatch_webhook_create(
+        self,
+        name: str,
+        use: str,
+        task_template: str = "{prompt}",
+        max_prompt_bytes: int = 4000,
+        rate_per_hour: int = 20,
+    ) -> dict:
+        """Create a webhook that opens a room under template `use`. The caller's prompt
+        goes into `task_template` at {prompt}. Returns the signing secret ONCE: give it to
+        the user to store; it can't be read back, only rotated."""
+        body = {
+            "use": use,
+            "task_template": task_template,
+            "max_prompt_bytes": max_prompt_bytes,
+            "rate_per_hour": rate_per_hour,
+        }
+        r = self._dispatch().create_webhook(name, body)
+        return {**r, "note": "the secret is shown only now; it can't be read back later"}
+
+    def dispatch_webhook_rotate(self, name: str) -> dict:
+        """Replace a webhook's secret; the old one stops working at once."""
+        return self._dispatch().rotate_webhook_secret(name)
+
+    def dispatch_delete(self, kind: Literal["template", "schedule", "webhook"], name: str) -> dict:
+        """Delete a template, schedule or webhook created through the API (a template still
+        in use is refused)."""
+        self._dispatch().delete(kind, name)
+        return {"deleted": f"{kind} {name}"}
+
 
 TOOLS = [
     "whoami",
@@ -317,6 +387,15 @@ TOOLS = [
     "dispatch_runs",
     "dispatch_run",
     "dispatch_trigger",
+    "dispatch_templates",
+    "dispatch_template_put",
+    "dispatch_schedule_get",
+    "dispatch_schedule_put",
+    "dispatch_webhooks",
+    "dispatch_webhook_get",
+    "dispatch_webhook_create",
+    "dispatch_webhook_rotate",
+    "dispatch_delete",
 ]
 
 INSTRUCTIONS = (
@@ -324,7 +403,8 @@ INSTRUCTIONS = (
     "Check inbox_check when the user asks what's new. Post typed messages (finding, "
     "proposal, answer...) and thread replies with reply_to. "
     + UNTRUSTED
-    + " Summon workers or trigger dispatch only when the user asks."
+    + " Summon workers, trigger dispatch, or create, change or delete dispatch definitions"
+    " only when the user asks."
 )
 
 
