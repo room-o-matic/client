@@ -296,6 +296,60 @@ def main() -> None:
         out = subprocess.check_output([*rom, "tail", room["room_url"], "--once"], env=cli_env)
         check("from the CLI" in out.decode(), "rom tail shows the CLI message")
 
+        # rom mcp: the tools an interactive session (e.g. Claude Code) uses, acting as missy
+        from roomomatic.inbox import Inbox
+        from roomomatic.mcp import RomTools
+
+        tools = RomTools(missy, inbox=Inbox(missy, state_path=tmp / "missy-inbox.json"))
+        check(tools.whoami()["identity"] == f"missy@{DOMAIN}", "mcp: whoami is you")
+        tools.inbox_check()  # start the read position now
+        made = tools.room_create("mcp-room", purpose="session tools")
+        url = made["room_url"]
+        check(
+            any(r["room_url"] == url for r in tools.rooms_list()["your_rooms"]),
+            "mcp: room created and listed as yours",
+        )
+        boostie_rooms, bid = boostie.room(url)
+        rooms_m, mid = missy.room(url)
+        rooms_m.update_room(mid, admission="open")
+        boostie_rooms.join(bid)
+        q = boostie_rooms.post(bid, "@missy is the plan ready?", type="question")
+        new = tools.inbox_check()["items"]
+        check([i["body"] for i in new] == ["@missy is the plan ready?"], "mcp: inbox mention")
+        sent = tools.room_send(
+            url,
+            "Yes, see the plan note.",
+            type="answer",
+            reply_to=q["id"],
+            to=[f"boostie@{DOMAIN}"],
+        )
+        check(sent["in_reply_to"] == q["id"], "mcp: threaded reply")
+        check(tools.note_put(url, "plan", ["ship v1"])["written"], "mcp: note created")
+        boostie_rooms.put_note(bid, "plan", ["ship v1", "boostie edit"])
+        lost = tools.note_put(url, "plan", ["ship v1", "missy edit"])
+        check(lost.get("conflict") is True, "mcp: stale note write refused")
+        summoned = tools.worker_summon(
+            url, "interactive", worker_type="fake", profile="workspace_coder", name="helper"
+        )
+        check(summoned["mention_as"] == "@helper", "mcp: worker summoned")
+        wait_for(
+            lambda: tools.worker_status(summoned["session_url"])["status"] == "running",
+            "mcp: worker running",
+        )
+        tools.worker_send(summoned["session_url"], "done")
+        wait_for(
+            lambda: tools.worker_status(summoned["session_url"])["status"] == "completed",
+            "mcp: worker finished",
+        )
+        check(
+            any(e["type"] == "final" for e in tools.worker_events(summoned["session_url"])),
+            "mcp: worker events",
+        )
+        boostie_rooms.post(bid, "replying to you", in_reply_to=sent["id"])
+        check(
+            [i["why"] for i in tools.inbox_check()["items"]] == ["reply to you"], "mcp: inbox reply"
+        )
+
         missy.close()
         boostie.close()
     print("e2e passed")
