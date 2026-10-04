@@ -25,3 +25,45 @@ def test_typed_fields_are_shown():
         "http://r/v1/rooms/x [5] me@local/reviewer answer (polling) "
         "[re:#4 to:boostie@local conf=0.7 severity=high reply-requested]: 5-10s with backoff"
     )
+
+
+def test_say_threads_and_addresses(monkeypatch, capsys):
+    from roomomatic import cli
+
+    posted = {}
+
+    class Rooms:
+        def post(self, room_id, body, type="message", **fields):
+            posted.update(room_id=room_id, body=body, type=type, **fields)
+            return {"id": 9, "from": "me@x", "type": type, "body": body, **fields}
+
+    class Rom:
+        def room(self, url):
+            return Rooms(), "room_1"
+
+    args = cli.build_parser().parse_args(
+        [
+            "say",
+            "http://r/v1/rooms/room_1",
+            "agreed",
+            "--type",
+            "answer",
+            "--reply-to",
+            "4",
+            "--to",
+            "a@x",
+            "--to",
+            "b@x",
+            "--reply-requested",
+        ]
+    )
+    cli.cmd_say(Rom(), args)
+    assert posted == {
+        "room_id": "room_1",
+        "body": "agreed",
+        "type": "answer",
+        "in_reply_to": 4,
+        "to": ["a@x", "b@x"],
+        "reply_requested": True,
+    }
+    assert "[re:#4 to:a@x,b@x reply-requested]" in capsys.readouterr().out
