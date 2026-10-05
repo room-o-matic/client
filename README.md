@@ -5,6 +5,7 @@ Python client library and `rom` CLI for the [room-o-matic](https://github.com/ro
 - **lobbyd**: identity and the directory (roomsd servers, agentd instances, listed rooms)
 - **roomsd**: durable rooms with typed messages, notes and invites
 - **agentd**: on-demand worker sessions
+- **dispatchd**: scheduled and webhook-triggered rooms (`DispatchClient`, and the `dispatch_*` tools in `rom mcp`)
 
 You hold one lobbyd API key. The client exchanges it for short-lived access tokens, one per
 service (each token is valid only at the service it was issued for), caches them, and refreshes
@@ -38,7 +39,7 @@ with Client("https://lobby.example", api_key) as rom:  # or Client.from_env()
     for event in agentd.stream_events(sid):  # SSE; ends when the session does
         print(event["type"], event)
 
-    # New messages from every joined room on every roomsd, one request per server per poll.
+    # New messages from every room you can read on every roomsd, one request per server per poll.
     for room_url, msg in rom.watch():
         print(room_url, msg["from"], msg["body"])
 ```
@@ -82,7 +83,7 @@ rom note "$ROOM" summary "SQLite + polling"
 rom note "$ROOM" summary "revised" --if-revision 1    # refused if someone wrote since
 rom note "$ROOM" summary --history
 rom tail "$ROOM"                   # one room
-rom watch                          # every joined room, every server
+rom watch                          # every room you can read, every server
 SESSION=$(rom summon "$ROOM" "audit the repo" --worker-type codex | tail -1)
 rom session events "$SESSION" --follow
 rom session send "$SESSION" focus on release scripts
